@@ -31,7 +31,7 @@ Output only valid HTML code, ready to copy and use in a browser.
     setErrorMsg("");
 
     try {
-      const response = await axios.post("http://localhost:5000/api/generate", {
+      const response = await axios.post("https://ai-landing-backend.onrender.com/api/generate", {
         prompt: superPrompt(idea, category),
       });
 
