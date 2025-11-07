@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useRef, useEffect } from "react";
 import axios from "axios";
 import { Loader2, Copy, Sparkles, Eye, X } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
@@ -12,40 +12,13 @@ const Home = () => {
   const [copied, setCopied] = useState(false);
   const [showModal, setShowModal] = useState(false);
 
-  const superPrompt = (idea, category) => `
-You are a world-class front-end designer. Create a **realistic, production-quality website** in pure **HTML + Tailwind CSS** for a ${category} product called "${idea}". 
+const superPrompt = (idea, category) => `
 
-The website should look **like a real startup or SaaS company site**, not a demo.
+You are a world-class front-end designer. Create a **realistic, production-quality website** in pure **HTML + Tailwind CSS** for a ${category} product called "${idea}".
 
-Requirements:
-1. Structure:
-   - **Navbar:** logo, nav links, call-to-action button.
-   - **Hero Section:** catchy headline, short subtext, and a strong CTA button.
-   - **Features Section:** 3–4 elegant cards with icons, short titles, and descriptions.
-   - **Testimonials Section:** 2–3 user testimonials with name, role, and quote.
-   - **Pricing Section:** 2–3 pricing cards with plan names, prices, and features.
-   - **Call-to-Action (CTA) Section:** a bold invitation to try or sign up.
-   - **Footer:** logo, quick links, and social icons.
+Output only valid HTML code, ready to copy and use in a browser.
 
-2. Design Style:
-   - Use **Tailwind CSS** only (no inline styles or JS).
-   - Choose a **modern SaaS aesthetic**: rounded corners, clean spacing, and balanced layout.
-   - Use **beautiful gradients**, subtle shadows, and pastel or muted colors.
-   - Typography: readable sans-serif (e.g., Inter, Poppins, or Open Sans).
-   - All images should use **placeholder URLs** (like via Unsplash).
-
-3. Responsiveness:
-   - The layout must work seamlessly on mobile, tablet, and desktop.
-   - Use responsive classes (e.g., grid-cols-1 md:grid-cols-3).
-
-4. Output:
-   - Output only **valid HTML code** (no Markdown or explanations).
-   - The HTML should be ready to copy and open in a browser.
-
-Goal:
-Create a website that feels like a **real, professional, fully built product landing page**, suitable for a live SaaS or startup website.
-`;
-
+`; 
 
   const handleGenerate = async () => {
     if (!idea.trim()) {
@@ -58,27 +31,31 @@ Create a website that feels like a **real, professional, fully built product lan
     setErrorMsg("");
 
     try {
-      const response = await axios.post(
-        "https://openrouter.ai/api/v1/chat/completions",
-        {
-          model: "openai/gpt-3.5-turbo",
-          messages: [{ role: "user", content: superPrompt(idea, category) }],
-        },
-        {
-          headers: {
-            Authorization: `Bearer ${import.meta.env.VITE_OPENROUTER_APIKEY}`,
-            "Content-Type": "application/json",
-          },
-        }
-      );
+      const response = await axios.post("http://localhost:5000/api/generate", {
+        prompt: superPrompt(idea, category),
+      });
 
-      setResult(response.data?.choices?.[0]?.message?.content || "No result");
+      // If backend returned an error payload, surface it
+      if (response.data?.error) {
+        const msg = response.data.error.message || response.data.error;
+        setErrorMsg(String(msg));
+        return;
+      }
+
+      // Robust extraction for different possible response shapes
+      const extracted =
+        response.data?.choices?.[0]?.message?.content ||
+        response.data?.choices?.[0]?.text ||
+        response.data?.generated_text ||
+        response.data?.output?.[0]?.content?.text ||
+        (typeof response.data === "string" ? response.data : null) ||
+        JSON.stringify(response.data || {}, null, 2);
+
+      setResult(extracted || "No result");
     } catch (error) {
       console.error(error);
       setErrorMsg(
-        error.response?.status === 401
-          ? "Unauthorized: API key is missing or cannot be used from frontend."
-          : "Something went wrong. Please try again."
+        "Something went wrong. Make sure the backend server is running and the API key is correct."
       );
     } finally {
       setLoading(false);
@@ -86,10 +63,45 @@ Create a website that feels like a **real, professional, fully built product lan
   };
 
   const copyHTML = () => {
-    navigator.clipboard.writeText(result);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 1500);
+    if (!result) return;
+
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(result).then(
+        () => {
+          setCopied(true);
+          const t = setTimeout(() => setCopied(false), 1500);
+          copyTimer.current = t;
+        },
+        () => {
+          // fallback
+          setErrorMsg("Failed to copy to clipboard");
+        }
+      );
+    } else {
+      // Fallback for older browsers
+      try {
+        const textarea = document.createElement("textarea");
+        textarea.value = result;
+        document.body.appendChild(textarea);
+        textarea.select();
+        document.execCommand("copy");
+        document.body.removeChild(textarea);
+        setCopied(true);
+        const t = setTimeout(() => setCopied(false), 1500);
+        copyTimer.current = t;
+      } catch (e) {
+        setErrorMsg("Copy not supported in this browser");
+      }
+    }
   };
+
+  // Keep a ref to the copy timer so we can clear it on unmount
+  const copyTimer = useRef(null);
+  useEffect(() => {
+    return () => {
+      if (copyTimer.current) clearTimeout(copyTimer.current);
+    };
+  }, []);
 
   return (
     <div className="min-h-screen flex flex-col bg-gradient-to-br from-purple-100 via-white to-indigo-100 dark:from-gray-900 dark:to-black text-gray-800 dark:text-gray-100 transition-all duration-500">
@@ -101,9 +113,7 @@ Create a website that feels like a **real, professional, fully built product lan
             <span>AI PageCraft</span>
           </div>
           <button
-            onClick={() =>
-              document.documentElement.classList.toggle("dark")
-            }
+            onClick={() => document.documentElement.classList.toggle("dark")}
             className="text-sm text-gray-500 dark:text-gray-400 border px-3 py-1 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 transition"
           >
             Toggle Theme
@@ -120,10 +130,10 @@ Create a website that feels like a **real, professional, fully built product lan
           className="w-full max-w-3xl bg-white/80 dark:bg-white/10 backdrop-blur-xl border border-white/30 rounded-3xl shadow-2xl p-8"
         >
           <h1 className="text-3xl font-extrabold text-center mb-4 text-purple-700 dark:text-purple-400">
-            Generate Stunning Landing Pages in Seconds 🚀
+            Generate Stunning Landing Pages 🚀
           </h1>
           <p className="text-center text-gray-500 dark:text-gray-400 mb-8">
-            Just type your product idea and AI will create a beautiful, ready-to-use HTML landing page.
+            Enter your product idea and AI will create a beautiful HTML landing page.
           </p>
 
           {/* Inputs */}
